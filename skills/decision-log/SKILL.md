@@ -1,109 +1,212 @@
 ---
 name: decision-log
-description: "Automatically generate lightweight decision logs during vibe coding sessions. Use when: (1) User writes/modifies code rapidly, (2) User wants to track why behind code changes without interrupting flow, (3) User needs to understand old vibe-coded projects later, (4) User commits code and wants auto-generated context in commit messages or .decisions/ logs"
+description: "MANDATORY pre-commit workflow for vibe coding. ALWAYS trigger when user says 'commit', 'git commit', or any commit-related command. Forces diff review and decision log generation BEFORE allowing commit to proceed."
 ---
 
-# Decision Log
+# Decision Log - Pre-Commit Workflow
 
-Automatically capture the reasoning behind code changes during vibe coding without breaking flow.
+## CRITICAL: ALWAYS Execute This Workflow Before Any Commit
 
-## Core Principle
+This skill is **mandatory** when user mentions commit. Do NOT skip to git commit directly.
 
-Vibe coding prioritizes **speed over polish**. This skill doesn't slow you down—it runs AFTER code is written to auto-generate minimal "why" documentation.
+## Workflow (Execute in Order)
 
-## Output Format
+### Step 1: STOP - Do Not Commit Yet
 
-Generate a 3-line decision log entry:
+When user says "commit" or "git commit":
+- **DO NOT** execute `git commit` immediately
+- User wants a commit, but you must generate decision log FIRST
 
-```
-[YYYY-MM-DD HH:MM] <one-line summary of change>
-- Why: <core decision point, 1 sentence>
-- Risk: <known gaps/shortcuts, 1 sentence or "none">
-```
+### Step 2: Review What's Being Committed
 
-### Example
+Run these commands in sequence:
 
-```
-[2026-01-28 10:30] Added citation deduplication
-- Why: Prevent duplicate citations in search results
-- Risk: Doesn't handle null IDs, will fail silently
-```
-
-## Storage Options
-
-### Option 1: Commit Message (default)
-Append to git commit message:
 ```bash
-git commit -m "Add citation dedup
+# See what files are staged
+git diff --cached --name-only
+
+# See the actual changes
+git diff --cached
+```
+
+Show the user:
+- Which files changed
+- Key changes (summarize if diff is >50 lines)
+
+### Step 3: Generate Decision Log
+
+Based on the diff, create a 3-line decision log:
+
+```
+[YYYY-MM-DD HH:MM] <one-line summary>
+- Why: <core reason for this change>
+- Risk: <known issues/shortcuts or "none">
+```
+
+**Rules:**
+- Summary: Extract from user's recent messages or infer from code changes
+- Why: The business/technical reason (not "user asked")
+- Risk: Be honest about shortcuts, missing tests, or edge cases
+
+**Example:**
+
+```
+[2026-01-28 14:30] Sync pairing settings types across test env
+- Why: Test suite needed updated Setting type to match production
+- Risk: May break other tests expecting old type structure
+```
+
+### Step 4: Show Proposed Commit
+
+Present to user:
+
+```
+I'll commit these changes:
+
+Files:
+- src/types/setting.ts
+- src/test/setup.ts
+(+ 3 more files)
+
+With message:
+---
+fix: sync pairing settings types and test env
 
 [Decision Log]
-- Why: Prevent duplicate citations
-- Risk: Null ID handling missing"
+[2026-01-28 14:30] Sync pairing settings types across test env
+- Why: Test suite needed updated Setting type to match production
+- Risk: May break other tests expecting old type structure
+---
+
+Proceed with commit? [y/n]
 ```
 
-### Option 2: `.decisions/` Directory
-Create dated log files:
-```
-.decisions/
-├── 2026-01-28.md
-└── 2026-01-27.md
-```
+### Step 5: Execute Commit
 
-Each entry appends to the day's file.
+**Only after user confirms**, run:
 
-### Option 3: Inline Comments
-Add decision as a code comment at change point:
-```python
-# [2026-01-28] Dedup by ID to avoid citation repeats
-# Risk: null IDs not handled
-citations = list(set(c.id for c in citations if c.id))
+```bash
+git commit -m "fix: sync pairing settings types and test env
+
+[Decision Log]
+[2026-01-28 14:30] Sync pairing settings types across test env
+- Why: Test suite needed updated Setting type to match production
+- Risk: May break other tests expecting old type structure"
 ```
 
-## Automatic Triggers
+**If user says "no":** Ask what to change (message or decision log)
 
-When Claude writes code in a vibe coding session, automatically:
+## Alternative: Silent Mode
 
-1. **After code generation**: Silently draft a decision log (don't show unless asked)
-2. **On commit/save**: Inject decision log into commit message or append to `.decisions/YYYY-MM-DD.md`
-3. **On request**: Show accumulated decisions when user asks "what did we change?" or "show decision log"
+If user says "commit --silent" or "commit -q":
+- Skip the confirmation prompt
+- Auto-generate decision log and commit immediately
+- Still show the commit message after it's done
 
-## Usage Patterns
+## Special Cases
 
-### Pattern 1: Silent Background Logging
+### Case 1: User Already Provided Commit Message
+
 ```
-User: "Add a cache for API responses"
-Claude: [writes code + silently stores decision]
-User: "git commit"
-Claude: [auto-injects decision into commit message]
-```
-
-### Pattern 2: Explicit Review
-```
-User: "Show me today's decisions"
-Claude: [displays all logged decisions from 2026-01-28.md]
+User: "commit with message 'fix tests'"
 ```
 
-### Pattern 3: Project Archaeology
+Response:
+1. Still run Steps 2-3 (review diff, generate log)
+2. Use their message as the title
+3. Append decision log
+4. Confirm before committing
+
+### Case 2: Empty Decision Log
+
+If you genuinely cannot determine "why" from context:
+
 ```
-User: "Why did we use a Set here?"
-Claude: [searches .decisions/ or git log for relevant entry]
+[Decision Log]
+- Why: See commit diff for details
+- Risk: none
 ```
 
-## Key Rules
+**DO NOT** skip the decision log section entirely.
 
-1. **Never interrupt flow**: Don't ask "should I log this?" Just log it.
-2. **3 lines max**: Force brevity. No essays.
-3. **Honest about risks**: If you took a shortcut, say it.
-4. **Timestamped**: Always include date/time for future sorting.
-5. **Searchable**: Use consistent format so `grep` works.
+### Case 3: User Bypasses You
 
-## Integration with MemOS
+If user runs `git commit` directly in terminal:
+- You can't intercept
+- That's fine - this skill only applies when they ask YOU to commit
 
-If user has MemOS enabled, decision logs can feed into long-term memory:
-- Extract "why" from `.decisions/` into MemOS facts
-- Surface relevant decisions when user asks "how does X work?"
+## Storage: Also Write to .decisions/
+
+In addition to commit message, append to `.decisions/YYYY-MM-DD.md`:
+
+```bash
+# After successful commit
+echo "[14:30] Sync pairing settings types across test env
+- Why: Test suite needed updated Setting type
+- Risk: May break other tests expecting old type structure
+
+" >> .decisions/2026-01-28.md
+```
+
+This creates a searchable log independent of git history.
+
+## Example Full Interaction
+
+```
+User: "commit"
+
+Claude:
+Reviewing staged changes...
+
+Files to commit:
+- src/types/setting.ts (modified)
+- src/test/setup.ts (modified)
+- src/contexts/__tests__/UpdateContext.test.tsx (modified)
+
+Key changes:
+- Added cursorPairing field to Setting type
+- Updated test environment to include new field
+- Synced test fixtures with type changes
+
+I'll commit with this message:
+---
+fix: sync pairing settings types and test env
+
+[Decision Log]
+[2026-01-28 14:30] Sync pairing settings types across test env
+- Why: Test suite needed updated Setting type to match production
+- Risk: May break other tests expecting old type structure
+---
+
+Proceed? (y/n)
+
+User: "y"
+
+Claude:
+[runs git commit]
+✓ Committed: 71a4b06
+✓ Appended to .decisions/2026-01-28.md
+```
+
+## Anti-Patterns (DO NOT DO)
+
+❌ **Skip diff review:** "Sure, committing now..."
+❌ **Skip confirmation:** Commit without asking
+❌ **Empty decision log:** Commit without the [Decision Log] section
+❌ **Assume context:** Generate log from old conversation instead of current diff
+
+## Integration with CI/CD
+
+If user's repo has a commit-msg hook, it might conflict. Suggest:
+
+```bash
+# Add to .git/hooks/commit-msg
+# Skip if [Decision Log] already present
+if grep -q "\[Decision Log\]" "$1"; then
+    exit 0
+fi
+```
 
 ## Resources
 
-### scripts/
-Contains `generate_decision_log.py` to extract decisions from git history or conversation context.
+This skill includes a helper script for manual decision log extraction.
