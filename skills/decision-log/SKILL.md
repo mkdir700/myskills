@@ -84,52 +84,97 @@ fix: sync pairing settings types and test env
 Proceed with commit? [y/n]
 ```
 
-### Step 5: Write Decision Log to File & Stage It
+### Step 5: APPEND Decision Log to File (DO NOT OVERWRITE)
 
-**CRITICAL: Do this BEFORE the actual commit**
+**CRITICAL: This step must APPEND, not overwrite existing content**
+
+Execute these commands in this exact order:
 
 ```bash
-# Create .decisions directory if it doesn't exist
+# 1. Create directory if needed
 mkdir -p .decisions
 
-# Append decision log to today's file
-cat >> .decisions/$(date +%Y-%m-%d).md << 'EOF'
-[14:30] Sync pairing settings types across test env
-- Why: Test suite needed updated Setting type to match production
-- Risk: May break other tests expecting old type structure
+# 2. Get today's date
+TODAY=$(date +%Y-%m-%d)
+
+# 3. APPEND to file (NEVER overwrite)
+# Use >> for append, NOT > which overwrites
+cat >> .decisions/$TODAY.md << 'EOF'
+[18:00] Make build workflow package-only
+- Why: Build pipeline should only produce artifacts without tagging or releasing
+- Risk: none
 
 EOF
+```
 
-# Stage the decision log file so it's included in this commit
+**VERIFICATION REQUIRED:**
+
+After appending, verify the file still contains old entries:
+
+```bash
+# Show the file to confirm old entries are preserved
+cat .decisions/$TODAY.md
+```
+
+**Expected output:**
+
+```
+[15:05] Add pairing orchestration tracing...
+[15:51] Improve pairing usecase...
+[16:28] Remove direct deps...
+[18:00] Make build workflow package-only  ← New entry appended
+```
+
+**If old entries are missing → ABORT and show error**
+
+### Step 6: Stage the Decision Log File
+
+```bash
+# Stage the entire .decisions/ directory
 git add .decisions/
 ```
 
-**Why this order matters:**
+**Why this matters:**
 
-1. Write decision log file
-2. `git add .decisions/` ← **This is key**
-3. Then `git commit` ← Decision log file is now part of this commit
+- The decision log file must be included in the same commit
+- Without staging, it won't be part of the commit
 
-### Step 6: Execute Commit
+### Step 7: Execute Commit
 
-**Only after user confirms AND decision log file is staged**, run:
+**Only after user confirms AND verification passes**, run:
 
 ```bash
-git commit -m "fix: sync pairing settings types and test env
+git commit -m "fix: make build workflow package-only
 
 [Decision Log]
-[2026-01-28 14:30] Sync pairing settings types across test env
-- Why: Test suite needed updated Setting type to match production
-- Risk: May break other tests expecting old type structure"
+[2026-01-28 18:00] Make build workflow package-only
+- Why: Build pipeline should only produce artifacts without tagging or releasing
+- Risk: none"
 ```
 
 **Result:**
 
 - Commit includes both code changes AND the `.decisions/YYYY-MM-DD.md` file
-- Commit message also contains the decision log
+- Old decision log entries are preserved in the file
 - No second commit needed
 
-**If user says "no":** Ask what to change (message or decision log)
+## Anti-Patterns (NEVER DO THESE)
+
+❌ **Using `>` instead of `>>`:** This OVERWRITES the file
+
+```bash
+cat > .decisions/2026-01-28.md  # ❌ WRONG - deletes old content
+```
+
+✅ **Correct: Use `>>`** This APPENDS to the file
+
+```bash
+cat >> .decisions/2026-01-28.md  # ✅ CORRECT - preserves old content
+```
+
+❌ **Not verifying after append:** Always check that old entries still exist
+
+❌ **Recreating the file:** Don't do `rm .decisions/$TODAY.md && echo ...`
 
 ## Complete Example Workflow
 
@@ -141,22 +186,20 @@ Claude:
 
 [Step 2]
 Files to commit:
-- src/types/setting.ts (modified)
-- src/test/setup.ts (modified)
+- src/workflows/build.yml (modified)
 
 Key changes:
-- Added cursorPairing field to Setting type
-- Updated test environment setup
+- Removed release steps from build workflow
 
 [Step 3 & 4]
 I'll commit with this message:
 ---
-fix: sync pairing settings types and test env
+fix: make build workflow package-only
 
 [Decision Log]
-[2026-01-28 14:30] Sync pairing settings types across test env
-- Why: Test suite needed updated Setting type to match production
-- Risk: May break other tests expecting old type structure
+[2026-01-28 18:00] Make build workflow package-only
+- Why: Build pipeline should only produce artifacts without tagging
+- Risk: none
 ---
 
 Proceed? (y/n)
@@ -164,105 +207,90 @@ Proceed? (y/n)
 User: "y"
 
 Claude:
-[Step 5] Writing decision log...
+[Step 5] Appending decision log...
 $ mkdir -p .decisions
 $ cat >> .decisions/2026-01-28.md << 'EOF'
-[14:30] Sync pairing settings types across test env
-- Why: Test suite needed updated Setting type to match production
-- Risk: May break other tests expecting old type structure
+[18:00] Make build workflow package-only
+- Why: Build pipeline should only produce artifacts without tagging
+- Risk: none
 
 EOF
+
+[Verification] Checking file contents...
+$ cat .decisions/2026-01-28.md
+
+File contents:
+[15:05] Add pairing orchestration tracing...
+[15:51] Improve pairing usecase...
+[16:28] Remove direct deps...
+[18:00] Make build workflow package-only  ✓ Appended correctly
+
+[Step 6] Staging decision log...
 $ git add .decisions/
 
-[Step 6] Committing...
-$ git commit -m "fix: sync pairing settings types and test env
+[Step 7] Committing...
+$ git commit -m "fix: make build workflow package-only
 
 [Decision Log]
-[2026-01-28 14:30] Sync pairing settings types across test env
-- Why: Test suite needed updated Setting type to match production
-- Risk: May break other tests expecting old type structure"
+[2026-01-28 18:00] Make build workflow package-only
+- Why: Build pipeline should only produce artifacts without tagging
+- Risk: none"
 
-✓ Committed: 71a4b06
-✓ Decision log included in commit (.decisions/2026-01-28.md)
+✓ Committed: abc1234
+✓ Decision log appended (preserving 3 previous entries)
 ```
 
-## Alternative: Silent Mode
+## Troubleshooting
 
-If user says "commit --silent" or "commit -q":
+### Problem: Old entries disappeared
 
-- Skip the confirmation prompt
-- Still write decision log file and stage it
-- Auto-commit with decision log included
-
-## Special Cases
-
-### Case 1: User Already Provided Commit Message
-
-```
-User: "commit with message 'fix tests'"
-```
-
-Response:
-
-1. Still run Steps 2-3 (review diff, generate log)
-2. Use their message as the title
-3. Append decision log to message
-4. Write log file and stage it (Step 5)
-5. Confirm before committing
-
-### Case 2: Empty Decision Log
-
-If you genuinely cannot determine "why" from context:
-
-```
-[Decision Log]
-- Why: See commit diff for details
-- Risk: none
-```
-
-**DO NOT** skip the decision log section entirely.
-
-### Case 3: .gitignore Excludes .decisions/
-
-If `.decisions/` is in `.gitignore`:
-
-- Warn the user
-- Ask if they want to force-add with `git add -f .decisions/`
-- Or suggest removing `.decisions/` from `.gitignore`
-
-## Anti-Patterns (DO NOT DO)
-
-❌ **Skip staging decision log file:** Writing to `.decisions/` but not running `git add .decisions/`
-❌ **Stage after commit:** Running `git commit` then `git add .decisions/`
-❌ **Skip diff review:** "Sure, committing now..."
-❌ **Skip confirmation:** Commit without asking
-❌ **Empty decision log:** Commit without the [Decision Log] section
-
-## Verification
-
-After commit, you can verify the decision log was included:
+**Symptoms:**
 
 ```bash
-# Check last commit includes .decisions/ file
-git show --name-only HEAD | grep .decisions
-
-# View the decision log from the commit
-git show HEAD:.decisions/2026-01-28.md
+$ cat .decisions/2026-01-28.md
+[18:00] Make build workflow package-only  # ← Only new entry, old ones gone
 ```
 
-## Integration with .gitignore
+**Cause:** Used `>` instead of `>>`, or recreated the file
 
-**Recommended:** Do NOT ignore `.decisions/` directory
+**Fix:**
 
-Add to your `.gitignore` if you have it:
+1. Check git history: `git show HEAD^:.decisions/2026-01-28.md`
+2. Restore old entries from previous commit
+3. Append new entry correctly with `>>`
+
+### Problem: File not included in commit
+
+**Symptoms:**
+
+```bash
+$ git show --name-only HEAD | grep .decisions
+# (nothing)
+```
+
+**Cause:** Forgot to run `git add .decisions/` before commit
+
+**Fix:**
+
+1. Amend the commit: `git add .decisions/ && git commit --amend --no-edit`
+
+## Integration Notes
+
+**For repositories with existing .decisions/ files:**
+
+- The skill will automatically append to existing files
+- Old entries are preserved
+- Multiple commits per day all go into the same dated file
+
+**File structure over time:**
 
 ```
-# Keep decision logs in git
-# .decisions/  ← Do NOT uncomment this
+.decisions/
+├── 2026-01-27.md  (5 entries)
+├── 2026-01-28.md  (8 entries ← growing throughout the day)
+└── 2026-01-29.md  (2 entries so far)
 ```
-
-Decision logs are valuable documentation and should be version-controlled alongside code.
 
 ## Resources
 
-This skill includes a helper script for manual decision log extraction.
+This skill includes a helper script that correctly handles append operations.
