@@ -1,26 +1,51 @@
 # AI Review Validator - Usage Examples
 
-## Example 1: High Confidence - Auto Apply
+## Example 1: GitHub URL - High Confidence Auto Apply
 
 **User Input:**
 ```
 验证并应用这个 AI Review:
-https://github.com/user/repo/pull/123#discussion_r456
-
-评论内容:
-⚠️ MouseEvent 在 Tauri v2 中已移除
-建议: 使用 LogicalPosition
-
-代码示例:
-- event.position()
-+ LogicalPosition::new(x, y)
-
-Prompt: 替换所有 MouseEvent.position() 为 LogicalPosition
+https://github.com/UniClipboard/UniClipboard/pull/158#discussion_r2734386595
 ```
 
 **Agent Process:**
 
+**Step 0: Fetch GitHub Comment**
+```bash
+# Convert URL to API format
+api_url=$(python3 scripts/github_url_converter.py \
+  "https://github.com/UniClipboard/UniClipboard/pull/158#discussion_r2734386595")
+# Output: https://api.github.com/repos/UniClipboard/UniClipboard/pulls/comments/2734386595
+
+# Fetch comment from GitHub API
+web_fetch "$api_url"
+
+# Response:
+{
+  "body": "⚠️ MouseEvent has been removed in Tauri v2\nUse LogicalPosition instead...",
+  "path": "src/window.rs",
+  "diff_hunk": "@@ -42,3 +42,3 @@\n-    event.position()\n+    LogicalPosition::new(x, y)",
+  "user": {"login": "coderabbitai"},
+  "html_url": "https://github.com/UniClipboard/UniClipboard/pull/158#discussion_r2734386595"
+}
+```
+
+**Step 1: Parse Comment**
+```python
+parsed = {
+  "risk": "MouseEvent removed in Tauri v2",
+  "deprecated_api": "event.position()",
+  "suggested_api": "LogicalPosition::new(x, y)",
+  "affected_file": "src/window.rs",
+  "original_url": "https://github.com/UniClipboard/UniClipboard/pull/158#discussion_r2734386595"
+}
+```
+
+**Step 2-4: Verification** (same as before)
+
 1. **Parse**: Extract deprecated_api="MouseEvent.position()", suggested_api="LogicalPosition::new()"
+
+**Step 2-5: Verification & Execution**
 
 2. **Verify Documentation (40 pts)**:
    ```bash
@@ -52,25 +77,44 @@ Prompt: 替换所有 MouseEvent.position() 为 LogicalPosition
    # Result: All pass → 10 pts
    ```
 
-6. **Score: 80/100 → AUTO_APPLY**
+**Score: 80/100 → AUTO_APPLY**
 
-7. **Execute**:
+6. **Execute**:
    ```bash
    str_replace(path="src/window.rs", 
                old_str="event.position()",
                new_str="LogicalPosition::new(x, y)")
    bash_tool "cargo build && cargo test"
+   
+   # ✅ CORRECT: Include AI Review URL in commit
    bash_tool 'git commit -m "fix: Replace MouseEvent with LogicalPosition
 
+Apply AI Review suggestion
 Verified confidence: 80/100
-Resolves: https://github.com/user/repo/pull/123#discussion_r456"'
+
+AI-Review: https://github.com/UniClipboard/UniClipboard/pull/158#discussion_r2734386595
+Resolves: https://github.com/UniClipboard/UniClipboard/pull/158#discussion_r2734386595"'
    ```
+
+**❌ WRONG - Never do this:**
+```bash
+# This is missing the AI Review URL!
+git commit -m "fix: sync pairing settings types and test env"
+```
+
+**Why this is wrong:**
+- No link to AI Review comment
+- Future developers won't know why this change was made
+- Can't trace back to the verification process
+- Loses accountability
 
 **Output:**
 ```markdown
 ✅ AI Review Suggestion Verified and Applied
 
 Confidence Score: 80/100
+
+**Source:** https://github.com/UniClipboard/UniClipboard/pull/158#discussion_r2734386595
 
 Verification:
 - ⚠️ Official Docs: Partially confirmed (LogicalPosition API exists)
@@ -84,15 +128,17 @@ Commit: abc123f
 
 ---
 
-## Example 2: Medium Confidence - Apply with Review
+## Example 2: Pasted Comment - Medium Confidence
 
 **User Input:**
 ```
-Check this AI Review:
+验证这个 AI Review:
 
 ⚠️ Performance: Unnecessary collect()
 - let sum: i32 = numbers.iter().collect::<Vec<_>>().iter().sum();
 + let sum: i32 = numbers.iter().sum();
+
+在 src/calculator.rs 中
 ```
 
 **Agent Process:**

@@ -9,11 +9,77 @@ description: Autonomously validate and execute AI Review suggestions from PR com
 
 Automate validation and execution of AI Review suggestions. This skill verifies AI-generated code review comments by checking official documentation, analyzing the codebase, testing compilation, and calculating confidence scores before automatically applying verified changes.
 
+## ⚠️ CRITICAL REQUIREMENT
+
+**EVERY commit that applies an AI Review suggestion MUST include the original comment URL in the commit message.**
+
+This is NON-NEGOTIABLE. The commit message format MUST be:
+
+```
+git commit -m "fix: <summary>
+
+Apply AI Review suggestion
+Verified with confidence: <score>/100
+
+AI-Review: <original_github_url>
+Resolves: <original_github_url>"
+```
+
+Without this link, the commit loses all traceability. This is one of the primary purposes of this skill - maintaining the connection between code changes and AI Review suggestions.
+
 ## Workflow
+
+### Step 0: Fetch GitHub PR Comment (if URL provided)
+
+If user provides a GitHub PR comment URL, convert it to API format and fetch content:
+
+**URL Conversion Examples:**
+```
+Input:  https://github.com/UniClipboard/UniClipboard/pull/158#discussion_r2734386595
+Output: https://api.github.com/repos/UniClipboard/UniClipboard/pulls/comments/2734386595
+
+Input:  https://github.com/owner/repo/pull/123#issuecomment-456789
+Output: https://api.github.com/repos/owner/repo/issues/comments/456789
+```
+
+**Implementation:**
+```bash
+# Use the included script to convert URL
+api_url=$(python3 scripts/github_url_converter.py "<user_provided_url>")
+
+# Fetch comment content from GitHub API
+web_fetch "$api_url"
+
+# API response structure:
+# {
+#   "body": "⚠️ MouseEvent removed...",  # AI Review comment text
+#   "path": "src/window.rs",              # Affected file
+#   "diff_hunk": "@@ -10,7 +10,7...",   # Code context
+#   "user": {"login": "github-copilot"}, # AI tool identifier
+#   "html_url": "...",                    # Original URL for commit reference
+#   "created_at": "2024-01-28T..."
+# }
+```
+
+**Supported URL formats:**
+- PR review comments: `#discussion_r{comment_id}` → `/pulls/comments/{comment_id}`
+- Issue/PR comments: `#issuecomment-{comment_id}` → `/issues/comments/{comment_id}`
+- Already API URLs: Pass through unchanged
+
+**Extract key information from API response:**
+```python
+# Parse the fetched comment
+comment_data = {
+    "body": response["body"],           # Full AI Review text
+    "affected_file": response["path"],  # File to modify
+    "original_url": response["html_url"], # For commit reference
+    "diff_context": response.get("diff_hunk", "")  # Code context
+}
+```
 
 ### Step 1: Parse AI Review Comment
 
-Extract structured information from the comment:
+Extract structured information from the comment (either from fetched API response or user-pasted content):
 
 ```python
 # Expected AI Review format:
@@ -31,9 +97,11 @@ comment_structure = {
     },
     "modification_prompt": str,  # Instructions for applying the change
     "affected_files": [str],
-    "comment_url": str
+    "comment_url": str        # CRITICAL: Save this for commit message!
 }
 ```
+
+**IMPORTANT:** The `comment_url` field MUST be preserved throughout the entire workflow. This URL will be used in the commit message to link the code change back to the AI Review suggestion. Never lose track of this URL.
 
 ### Step 2: Multi-Dimensional Verification
 
@@ -112,6 +180,8 @@ else:
 
 ### Step 4: Execute Based on Confidence
 
+**Before proceeding, review `references/commit-checklist.md` to ensure all required fields are included in the commit message.**
+
 #### AUTO_APPLY (≥80)
 
 ```bash
@@ -127,7 +197,8 @@ str_replace(
 bash_tool "<build_command>"
 bash_tool "<test_command>"
 
-# Commit with reference
+# CRITICAL: Commit MUST include AI Review URL reference
+# This is NON-NEGOTIABLE - the commit message MUST link to the original AI Review
 bash_tool 'git add .'
 bash_tool 'git commit -m "fix: <summary>
 
@@ -136,12 +207,38 @@ Verified with confidence: <score>/100
 
 Verification:
 - Docs: <status>
-- Compilation: <status>
+- Compilation: <status>  
 - Tests: <status>
 
-Resolves: <comment_url>
+AI-Review: <original_comment_url>
+Resolves: <original_comment_url>
 Co-authored-by: AI Review Validator <agent@ai-review.dev>"'
 ```
+
+**MANDATORY Commit Message Format:**
+
+The commit message MUST include the original AI Review comment URL. This is essential for:
+1. Traceability - linking code changes to the suggestion source
+2. Accountability - showing what was verified
+3. Context - future developers can see why the change was made
+
+**Bad commit (NEVER do this):**
+```
+git commit -m "fix: sync pairing settings types and test env"
+```
+❌ Missing AI Review URL reference!
+
+**Good commit (ALWAYS do this):**
+```
+git commit -m "fix: Replace MouseEvent with LogicalPosition
+
+Apply AI Review suggestion
+Verified with confidence: 85/100
+
+AI-Review: https://github.com/user/repo/pull/123#discussion_r456
+Resolves: https://github.com/user/repo/pull/123#discussion_r456"
+```
+✅ Includes AI Review URL - properly traceable!
 
 Report format:
 ```markdown
@@ -163,6 +260,29 @@ Linked: <comment_url>
 
 Apply changes but flag potential issues:
 
+```bash
+# Apply changes
+str_replace(...)
+
+# Verify
+bash_tool "<build_command>"
+bash_tool "<test_command>"
+
+# Commit with AI Review URL (MANDATORY)
+bash_tool 'git commit -m "fix: <summary>
+
+Apply AI Review suggestion with review needed
+Verified with confidence: <score>/100
+
+⚠️ Please review:
+- <concern 1>
+- <concern 2>
+
+AI-Review: <original_comment_url>
+Resolves: <original_comment_url>"'
+```
+
+Report format:
 ```markdown
 ⚠️ AI Review Suggestion Applied - Please Review
 
@@ -174,6 +294,9 @@ Concerns:
 Changes applied but recommend reviewing:
 1. <area of concern>
 2. <edge case>
+
+Commit: <hash>
+AI Review: <original_url>
 ```
 
 #### MANUAL_REVIEW (40-59)
@@ -213,13 +336,18 @@ Process all files, create single atomic commit:
 for file in affected_files:
     str_replace(...)
 
+# MUST include AI Review URL
 bash_tool 'git commit -m "fix: <summary>
+
+Apply AI Review suggestion
+Verified with confidence: <score>/100
 
 Modified files:
 - <file1>
 - <file2>
 
-Resolves: <comment_url>"'
+AI-Review: <original_comment_url>
+Resolves: <original_comment_url>"'
 ```
 
 ### Conflicting Information
@@ -247,8 +375,18 @@ return "REJECT", "Tests fail after applying suggestion"
 2. **Provide evidence** - Show docs, compilation output, test results
 3. **Be transparent** - Explain confidence scoring
 4. **Safety first** - Verify builds/tests before committing
-5. **Traceable** - Always link commits to AI Review comments
+5. **MANDATORY: Link to AI Review in commit** - Every commit MUST include the original AI Review comment URL in the commit message. Use both `AI-Review:` and `Resolves:` fields.
 6. **Human-in-loop** - Flag uncertain cases for review
+
+**Critical Commit Message Requirement:**
+
+EVERY commit that applies an AI Review suggestion MUST include:
+```
+AI-Review: <original_github_url>
+Resolves: <original_github_url>
+```
+
+This is NON-NEGOTIABLE. Without this link, the commit loses all traceability to the AI Review that prompted it.
 
 ## Common Patterns
 
@@ -281,10 +419,31 @@ Escalate to human review when:
 - Security-critical code
 - Architectural changes
 
+## Scripts
+
+This skill includes a helper script for GitHub integration:
+
+### scripts/github_url_converter.py
+
+Converts GitHub PR comment URLs to GitHub API URLs for fetching comment content.
+
+**Usage:**
+```bash
+python3 scripts/github_url_converter.py "https://github.com/owner/repo/pull/123#discussion_r456"
+# Output: https://api.github.com/repos/owner/repo/pulls/comments/456
+```
+
+**Supported formats:**
+- PR review comments: `#discussion_r{id}`
+- Issue/PR comments: `#issuecomment-{id}`
+
+The script handles URL conversion automatically so you can fetch AI Review content directly from GitHub's API.
+
 ## Detailed Examples
 
 For comprehensive examples of different scenarios, see `references/examples.md`:
-- High confidence auto-apply (Tauri v2 migration)
+- GitHub URL with API fetching (complete workflow)
+- Pasted comment content (manual input)
 - Medium confidence with warnings (performance optimization)
 - Low confidence rejection (false positive detection)
 - Multiple file batch processing
